@@ -6,7 +6,10 @@ document.getElementById('runBtn').addEventListener('click', () => {
       class: "Sleeper (SL)",
       quota: "GENERAL",
       trainName: "MAHANAGARI EXP (22177)",
-      bookingClass: "AC 2 Tier (2A)"
+      bookingClass: "AC 2 Tier (2A)",
+      username: "anilpal707",
+      password: "Apovey@6472",
+      captcha: ""
     };
   
     chrome.tabs.query({ active: true, currentWindow: true }, (tabs) => {

@@ -308,11 +308,52 @@ async function selectTrainAndBook(d) {
                     const targetSpan = spans.find(span => span.textContent.trim() === "Yes" || span.textContent.trim() === "I Agree");
                     
                     if (targetSpan) {
-                        // find closest button
                         const targetBtn = targetSpan.closest('button');
                         if (targetBtn) {
                             await nativeClick(targetBtn);
                             console.log(`✅ Cleared Confirmation Dialog!`);
+                        }
+                        break;
+                    }
+                }
+                
+                // Phase 2: Login Modal handling
+                console.log(`⏳ Checking for Login Modal...`);
+                for (let k = 0; k < 12; k++) {
+                    await wait(1000);
+                    const userInp = document.querySelector("input[formcontrolname='userid']");
+                    const passInp = document.querySelector("input[formcontrolname='password']");
+                    
+                    if (userInp && passInp && userInp.offsetParent !== null) {
+                        console.log(`✅ Login Modal Detected!`);
+                        await randomWait(1000, 2000); // Human pause
+
+                        // Smart fill: Check if username is already present
+                        if (userInp.value && userInp.value.trim() !== '') {
+                            console.log(`✅ Username field already contains data (${userInp.value}). Skipping ID typing...`);
+                        } else {
+                            console.log(`✍️ Username field is empty. Natively typing username...`);
+                            await typeNative(userInp, d.username, "Username");
+                            await randomWait(300, 600);
+                        }
+                        
+                        // Smart fill: Check if password is already present
+                        if (passInp.value && passInp.value.trim() !== '') {
+                            console.log(`✅ Password field already contains data. Skipping PASS typing...`);
+                        } else {
+                            console.log(`✍️ Password field is empty. Natively typing password...`);
+                            await typeNative(passInp, d.password, "Password");
+                            await randomWait(300, 600);
+                        }
+                        
+                        const buttons = Array.from(document.querySelectorAll("button.search_btn.train_Search"));
+                        const signInBtn = buttons.find(b => b.textContent.includes("SIGN IN"));
+                        if (signInBtn) {
+                            console.log(`✅ Found SIGN IN button. Firing native click!`);
+                            await nativeClick(signInBtn);
+                            console.log(`✨ SIGN IN action complete!`);
+                        } else {
+                            console.error(`❌ Could not locate the SIGN IN button!`);
                         }
                         break;
                     }

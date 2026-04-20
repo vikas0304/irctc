@@ -50,6 +50,9 @@ chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
             type: "mouseMoved", x: request.x, y: request.y
         }, () => {
             if (chrome.runtime.lastError) {
+                if(chrome.runtime.lastError.message.includes("Detached") || chrome.runtime.lastError.message.includes("Target closed")) {
+                    sendResponse({ status: "Success" }); return;
+                }
                 console.error("[Background] Move Error:", chrome.runtime.lastError.message);
                 sendResponse({ status: "Error", message: chrome.runtime.lastError.message });
                 return;
@@ -59,6 +62,9 @@ chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
                 type: "mousePressed", x: request.x, y: request.y, button: "left", clickCount: 1
             }, () => {
                 if (chrome.runtime.lastError) {
+                    if(chrome.runtime.lastError.message.includes("Detached") || chrome.runtime.lastError.message.includes("Target closed")) {
+                        sendResponse({ status: "Success" }); return;
+                    }
                     console.error("[Background] Press Error:", chrome.runtime.lastError.message);
                     sendResponse({ status: "Error", message: chrome.runtime.lastError.message });
                     return;
@@ -68,6 +74,9 @@ chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
                     type: "mouseReleased", x: request.x, y: request.y, button: "left", clickCount: 1
                 }, () => {
                     if (chrome.runtime.lastError) {
+                        if(chrome.runtime.lastError.message.includes("Detached") || chrome.runtime.lastError.message.includes("Target closed")) {
+                            sendResponse({ status: "Success" }); return;
+                        }
                         console.error("[Background] Release Error:", chrome.runtime.lastError.message);
                         sendResponse({ status: "Error", message: chrome.runtime.lastError.message });
                         return;
