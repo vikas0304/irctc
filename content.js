@@ -27,6 +27,17 @@ async function detachDebugger() {
     });
 }
 
+async function humanChaos() {
+    console.log("🌪️ Injecting human mouse chaos...");
+    const jitterCount = Math.floor(Math.random() * 3) + 2; // 2 to 4 moves
+    for (let i = 0; i < jitterCount; i++) {
+        const randX = Math.floor(Math.random() * 700) + 100;
+        const randY = Math.floor(Math.random() * 500) + 100;
+        await new Promise(r => chrome.runtime.sendMessage({ action: "NATIVE_MOVE", x: randX, y: randY }, r));
+        await randomWait(50, 150);
+    }
+}
+
 async function nativeClick(element) {
     if (!element) return false;
     element.scrollIntoView({ behavior: 'smooth', block: 'center' });
@@ -366,6 +377,150 @@ async function selectTrainAndBook(d) {
 }
 
 // ----------------------------------------------------
+// PASSENGER ENTRY LOGIC (PHASE 3)
+// ----------------------------------------------------
+async function fillPassengerDetails(d) {
+    if (!d.passengers || !d.passengers.length) {
+        console.error("❌ No passenger data provided.");
+        return;
+    }
+    
+    console.log(`🚂 Starting Passenger Detail Filling...`);
+    
+    for (let idx = 0; idx < d.passengers.length; idx++) {
+        const pax = d.passengers[idx];
+        
+        // Wait for age input to appear indicating the block is rendered
+        let paxBlockFound = false;
+        for (let i = 0; i < 15; i++) {
+            await wait(1000);
+            const ageInputs = document.querySelectorAll("input[formcontrolname='passengerAge']");
+            if (ageInputs.length > idx) {
+                paxBlockFound = true;
+                break;
+            }
+        }
+        
+        if (!paxBlockFound) {
+             console.error(`❌ Could not find passenger form block for ${pax.name}`);
+             break;
+        }
+
+        console.log(`✍️ Inputting details for: ${pax.name}`);
+        
+        const nameInp = document.querySelectorAll("p-autocomplete[formcontrolname='passengerName'] input")[idx];
+        const ageInp = document.querySelectorAll("input[formcontrolname='passengerAge']")[idx];
+        const genSelect = document.querySelectorAll("select[formcontrolname='passengerGender']")[idx];
+        const berthSelect = document.querySelectorAll("select[formcontrolname='passengerBerthChoice']")[idx];
+        
+        // Wait just slightly for Angular view to stabilize fully
+        await randomWait(300, 500);
+        
+        if (nameInp) {
+            await typeNative(nameInp, pax.name, "Passenger Name");
+            await randomWait(200, 400);
+            await pressKeyNative("Escape", "Escape", 27); // Close autocomplete box just in case
+            await randomWait(300, 600);
+        }
+        
+        if (ageInp) {
+            await typeNative(ageInp, String(pax.age), "Passenger Age");
+            await randomWait(300, 500);
+        }
+        
+        // Gender is a <select>. Natively, setting value + dispatching "change" works in Angular generally.
+        if (genSelect) {
+            genSelect.value = pax.gender;
+            genSelect.dispatchEvent(new Event('change', { bubbles: true }));
+            console.log(`✅ Selected Gender: ${pax.gender}`);
+        }
+        await randomWait(300, 500);
+        
+        // Berth Choice
+        if (pax.berth && berthSelect) {
+            berthSelect.value = pax.berth;
+            berthSelect.dispatchEvent(new Event('change', { bubbles: true }));
+            console.log(`✅ Selected Berth: ${pax.berth}`);
+        }
+        
+        // Add new passenger block if there are more
+        if (idx < d.passengers.length - 1) {
+            console.log(`➕ Adding new passenger block...`);
+            const addSpans = Array.from(document.querySelectorAll("span.prenext"));
+            const addBtn = addSpans.find(s => s.textContent.includes("+ Add Passenger"));
+            if (addBtn) {
+                await nativeClick(addBtn);
+                await randomWait(800, 1500);
+            }
+        }
+    }
+    
+    console.log(`✅✅ Passenger fill complete!`);
+    await humanChaos();
+    
+    // ----------------------------------------------------
+    // PAYMENT OPTIONS & SUBMIT (PHASE 4)
+    // ----------------------------------------------------
+    console.log(`⏳ Searching for BHIM/UPI Payment Option...`);
+    let paymentSelected = false;
+    for (let i = 0; i < 15; i++) {
+        await wait(1000);
+        // Locate label with the exact text
+        const labels = Array.from(document.querySelectorAll('label'));
+        const upiLabel = labels.find(l => l.textContent.includes("Pay through BHIM/UPI"));
+        
+        if (upiLabel) {
+            console.log(`✅ Found BHIM/UPI Label object!`);
+            
+            // Check if it's already checked (PrimeNG ui-state-active)
+            const radioBox = upiLabel.querySelector('.ui-radiobutton-box');
+            if (radioBox && radioBox.classList.contains('ui-state-active')) {
+                console.log(`✅ BHIM/UPI is already selected by default! Leaving it alone.`);
+                paymentSelected = true;
+                break;
+            } else {
+                console.log(`🎯 BHIM/UPI is NOT selected. Sending native click...`);
+                // Send click directly to the visual radio box if it exists, else label
+                const targetClick = radioBox || upiLabel;
+                await nativeClick(targetClick);
+                
+                // Let Angular process the change visually
+                await randomWait(300, 500); 
+                
+                // Verify the click stuck
+                if (radioBox && radioBox.classList.contains('ui-state-active')) {
+                    console.log(`✅ Successfully selected BHIM/UPI Payment!`);
+                } else {
+                    console.warn(`⚠️ Click sent to BHIM/UPI, but state change not verified. It may still be processed.`);
+                }
+                paymentSelected = true;
+                break;
+            }
+        }
+    }
+    
+    if (paymentSelected) {
+        console.log(`⏳ Searching for Continue button...`);
+        for (let i = 0; i < 20; i++) {
+            await wait(1000);
+            const buttons = Array.from(document.querySelectorAll('button.btnDefault'));
+            const continueBtn = buttons.find(b => b.textContent && b.textContent.trim() === "Continue");
+            
+            if (continueBtn) {
+                // Extra Jittering / Panic as requested
+                await humanChaos();
+                console.log(`👀 Trembling with panic... clicking Continue!`);
+                await randomWait(500, 1000);
+                
+                await nativeClick(continueBtn); 
+                console.log(`✨✨ CHECKOUT ACTION COMPLETE ✨✨`);
+                break;
+            }
+        }
+    }
+}
+
+// ----------------------------------------------------
 // MAIN EVENT LISTENER
 // ----------------------------------------------------
 chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
@@ -382,6 +537,8 @@ chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
                 // Check URL to decide which stage of automation to run
                 if (window.location.href.includes("train-list")) {
                     await selectTrainAndBook(d);
+                } else if (window.location.href.includes("psgninput")) {
+                    await fillPassengerDetails(d);
                 } else {
                     await searchTrains(d);
                 }

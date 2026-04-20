@@ -37,6 +37,26 @@ chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
         return true;
     }
 
+    if (request.action === "NATIVE_MOVE") {
+        if (!attachedTabs.has(tabId)) {
+            sendResponse({ status: "Error", message: "Debugger not attached" });
+            return true;
+        }
+        chrome.debugger.sendCommand({ tabId: tabId }, "Input.dispatchMouseEvent", {
+            type: "mouseMoved", x: request.x, y: request.y
+        }, () => {
+            if (chrome.runtime.lastError) {
+                if(chrome.runtime.lastError.message.includes("Detached") || chrome.runtime.lastError.message.includes("Target closed")) {
+                    sendResponse({ status: "Success" }); return;
+                }
+                sendResponse({ status: "Error", message: chrome.runtime.lastError.message });
+                return;
+            }
+            sendResponse({ status: "Success" });
+        });
+        return true;
+    }
+
     if (request.action === "NATIVE_CLICK") {
         if (!attachedTabs.has(tabId)) {
             sendResponse({ status: "Error", message: "Debugger not attached" });
