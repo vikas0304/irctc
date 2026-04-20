@@ -1,8 +1,11 @@
 {
   "manifest_version": 3,
-  "name": "IRCTC Intern Master",
-  "version": "1.2",
-  "permissions": ["activeTab", "scripting"],
+  "name": "IRCTC Intern Master (Test 3.9)",
+  "version": "1.9",
+  "permissions": ["activeTab", "debugger", "scripting", "storage"],
+  "background": {
+    "service_worker": "background.js"
+  },
   "action": {
     "default_popup": "popup.html"
   },

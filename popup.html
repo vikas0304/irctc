@@ -2,23 +2,28 @@
 <html>
 <head>
   <style>
-    body { width: 250px; padding: 15px; font-family: 'Segoe UI', Tahoma, sans-serif; background: #f8f9fa; }
-    .card { background: white; padding: 10px; border-radius: 8px; box-shadow: 0 2px 5px rgba(0,0,0,0.1); margin-bottom: 15px; }
+    body { width: 260px; padding: 15px; font-family: 'Segoe UI', Tahoma, sans-serif; background: #f8f9fa; }
+    .card { background: white; padding: 10px; border-radius: 8px; box-shadow: 0 2px 5px rgba(0,0,0,0.1); margin-bottom: 10px; }
     .detail { font-size: 12px; color: #444; margin: 4px 0; }
     button { 
-      width: 100%; padding: 12px; background: #fb792b; color: white; 
-      border: none; border-radius: 5px; cursor: pointer; font-weight: bold;
+      width: 100%; padding: 10px; background: #fb792b; color: white; 
+      border: none; border-radius: 5px; cursor: pointer; font-weight: bold; margin-top: 5px;
     }
     button:hover { background: #e66a1f; }
+    #bookBtn { background: #28a745; }
+    #bookBtn:hover { background: #218838; }
   </style>
 </head>
 <body>
   <div class="card">
-    <div class="detail"><b>User:</b> anilpal707</div>
-    <div class="detail"><b>Train:</b> 22183 (LTT-PRYJ)</div>
+    <div class="detail"><b>Search:</b> LTT -> PRYJ</div>
     <div class="detail"><b>Date:</b> 30/05/2026</div>
   </div>
-  <button id="runBtn">⚡ RUN AUTO-FILL</button>
+  <div class="card">
+    <div class="detail"><b>Train:</b> MAHANAGARI EXP (22177)</div>
+    <div class="detail"><b>Class:</b> AC 2 Tier (2A)</div>
+  </div>
+  <button id="runBtn">⚡ RUN AUTOMATION</button>
   <script src="popup.js"></script>
 </body>
 </html>
