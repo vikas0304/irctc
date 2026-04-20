@@ -65,7 +65,7 @@ async function nativeClick(element) {
             } else if (response && response.status === "Success") {
                 resolve(true);
             } else {
-                console.error("❌ Native click failed. Response:", response);
+                console.error("❌ Native click failed. Response:", response ? JSON.stringify(response) : "undefined");
                 resolve(false);
             }
         });
@@ -331,9 +331,15 @@ async function selectTrainAndBook(d) {
                 // Phase 2: Login Modal handling
                 console.log(`⏳ Checking for Login Modal...`);
                 for (let k = 0; k < 12; k++) {
-                    await wait(1000);
+                    await wait(250);
                     const userInp = document.querySelector("input[formcontrolname='userid']");
                     const passInp = document.querySelector("input[formcontrolname='password']");
+                    const errorMsg = document.querySelector(".ui-messages-error");
+                    
+                    if (errorMsg && errorMsg.offsetParent !== null) {
+                        console.error("❌ IRCTC Error detected, aborting login loop.");
+                        break;
+                    }
                     
                     if (userInp && passInp && userInp.offsetParent !== null) {
                         console.log(`✅ Login Modal Detected!`);
@@ -521,6 +527,185 @@ async function fillPassengerDetails(d) {
 }
 
 // ----------------------------------------------------
+// OCR CAPTCHA & FINAL REVIEW LOGIC (PHASE 5)
+// ----------------------------------------------------
+async function processReviewAndCaptcha() {
+    console.log(`🚂 Attempting CAPTCHA OCR sequence...`);
+    
+    let lastCaptchaSrc = null;
+
+    for (let retry = 1; retry <= 5; retry++) {
+        if (retry > 1) {
+            console.log(`🔄 CAPTCHA Retry Attempt #${retry}...`);
+            await randomWait(300, 600); // FASTER wait
+        }
+
+        let base64Image = null;
+        let captchaInput = null;
+
+        // 1. Hunt down the Base64 CAPTCHA Blob from the DOM
+        for (let i = 0; i < 15; i++) {
+            await wait(250); // Aggressively poll at 4x speed
+            
+            if (window.location.href.toLowerCase().includes("bkgpaymentoptions")) return;
+
+            captchaInput = document.querySelector("input[formcontrolname='captcha'], input#captcha");
+            const possibleImgs = Array.from(document.querySelectorAll("img"));
+            const captchaImgEl = possibleImgs.find(img => img.src && img.src.includes('base64'));
+            
+            if (captchaImgEl && captchaInput) {
+                 // On retries, we expect a NEW image. If it stays the same, it hasn't refreshed yet.
+                 if (captchaImgEl.src !== lastCaptchaSrc) {
+                     base64Image = captchaImgEl.src;
+                     lastCaptchaSrc = base64Image;
+                     break;
+                 } else if (i === 5 && retry > 1) {
+                     // If we've waited 5 seconds on a retry and image hasn't changed, 
+                     // IRCTC might be stuck. Force a refresh click.
+                     console.log("🔄 CAPTCHA stuck. Firing manual refresh...");
+                     const refreshBtn = document.querySelector("a[aria-label='Refresh Captcha'], .glyphicon-repeat");
+                     if (refreshBtn) await nativeClick(refreshBtn);
+                 }
+            }
+        }
+        
+        if (!base64Image || !captchaInput) {
+            console.warn(`⚠️ Could not locate a New CAPTCHA image. Page might be hanging or transitioned.`);
+            if (window.location.href.toLowerCase().includes("bkgpaymentoptions")) return;
+            continue; 
+        }
+        
+        console.log(`✅ Extracted CAPTCHA Blob! Bouncing it to Python AI Server...`);
+        
+        // 2. Request OCR Resolution Locally
+        let solvedText = "";
+        try {
+            const response = await fetch("http://localhost:5000/solve", {
+                method: "POST",
+                headers: { "Content-Type": "application/json" },
+                body: JSON.stringify({ image: base64Image })
+            });
+            
+            if (response.ok) {
+                const json = await response.json();
+                solvedText = json.solved_text;
+                console.log(`🧠 Local AI solved CAPTCHA: [${solvedText}]`);
+            } else {
+                console.error(`❌ Local API returned an error.`);
+                return; 
+            }
+        } catch (e) {
+            console.error(`❌ Connection to Local Python Server failed!`, e);
+            return;
+        }
+        
+        // 3. Punch in the solution 
+        if (solvedText && solvedText !== "UNKNOWN") {
+            // Clear input first
+            captchaInput.value = "";
+            captchaInput.dispatchEvent(new Event('input', { bubbles: true }));
+
+            await typeNative(captchaInput, solvedText, "Captcha");
+            await randomWait(800, 1500); 
+            
+            // 4. Click the "Continue" button
+            const buttons = Array.from(document.querySelectorAll('button.btnDefault'));
+            const continueBtn = buttons.find(b => b.textContent && b.textContent.trim() === "Continue");
+            
+            if (continueBtn) {
+                console.log(`🎯 Clicking Continue...`);
+                await randomWait(100, 250); // Faster checkout click
+                await nativeClick(continueBtn);
+                
+                console.log(`⏳ Monitoring rapid validation...`);
+                
+                // Aggressive fast-polling for 3 seconds max
+                let errorFound = false;
+                for (let j = 0; j < 15; j++) {
+                    await wait(200); 
+
+                    const lowerUrl = window.location.href.toLowerCase();
+                    if (lowerUrl.includes("paymentoptions") || lowerUrl.includes("bkgpaymentoptions")) {
+                        console.log(`✨✨ CAPTCHA ACCEPTED! ✨✨`);
+                        return;
+                    }
+                    
+                    const errorSpan = document.querySelector(".error, .ui-messages-error-detail");
+                    if (errorSpan && errorSpan.textContent && errorSpan.textContent.trim() !== '') {
+                        console.log(`❗ IRCTC Error Triggered: ${errorSpan.textContent}`);
+                        errorFound = true;
+                        break; // Fail fast so the loop restarts immediately!
+                    }
+                }
+                
+                if (!errorFound) {
+                    const lowerUrl = window.location.href.toLowerCase();
+                    if (lowerUrl.includes("paymentoptions") || lowerUrl.includes("bkgpaymentoptions")) return;
+                }
+                console.warn(`⚠️ Validation failed or timed out. Re-engaging captcha extraction...`);
+            }
+        } else {
+            console.log(`⚠️ OCR returned empty/UNKNOWN. Retrying...`);
+            // Force a captcha refresh if possible, or just wait for the loop to catch a change
+            const refreshBtn = document.querySelector("a[aria-label='Refresh Captcha'], .glyphicon-repeat");
+            if (refreshBtn) {
+                await nativeClick(refreshBtn);
+                await wait(2000);
+            }
+        }
+    }
+    
+    console.error(`❌ Max CAPTCHA retries reached. Manual intervention required.`);
+}
+
+async function processPaymentOptions(d) {
+    console.log(`🚂 Reached Payment Options page. Finalizing order...`);
+    
+    for (let i = 0; i < 20; i++) {
+        await wait(1000);
+        
+        // Broaden search: look for ANY button that mentions "Pay & Book"
+        const allButtons = Array.from(document.querySelectorAll('button'));
+        const payBtn = allButtons.find(b => b.textContent && b.textContent.includes("Pay & Book") && b.offsetParent !== null);
+        
+        if (payBtn) {
+            console.log(`🎯 Found 'Pay & Book' button (Visible). Firing final click!`);
+            
+            // Check if disabled
+            if (payBtn.disabled || payBtn.getAttribute('aria-disabled') === 'true') {
+                console.log(`⚠️ Button is found but currently disabled. Waiting...`);
+                continue;
+            }
+
+            await randomWait(1500, 2500); // Human pause before payment
+            
+            // Because Chrome's Service Worker IPC may close its ports intermittently during 
+            // the gateway redirect, we enforce a hard DOM click to guarantee success!
+            try {
+                payBtn.click();
+            } catch (e) {
+                console.error("DOM Click Failed", e);
+            }
+            
+            // We also fire the native hardware click as backup insurance
+            await nativeClick(payBtn);
+            
+            console.log(`🚀🚀 REDIRECTING TO PAYMENT GATEWAY! MISSION COMPLETE! 🚀🚀`);
+            
+            // Small extra check
+            await wait(2000);
+            if (window.location.href.includes("irctcipay.com")) {
+                 console.log("✅ Verified: Landing on iPay gateway.");
+            }
+            break;
+        } else {
+            const visibleButtons = allButtons.filter(b => b.offsetParent !== null).map(b => b.textContent?.trim());
+            console.log(`⏳ Still looking for 'Pay & Book' button...`);
+        }
+    }
+}
+
+// ----------------------------------------------------
 // MAIN EVENT LISTENER
 // ----------------------------------------------------
 chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
@@ -534,11 +719,17 @@ chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
                 
                 const d = msg.data;
 
+                const currentUrl = window.location.href.toLowerCase();
+
                 // Check URL to decide which stage of automation to run
-                if (window.location.href.includes("train-list")) {
+                if (currentUrl.includes("train-list")) {
                     await selectTrainAndBook(d);
-                } else if (window.location.href.includes("psgninput")) {
+                } else if (currentUrl.includes("psgninput")) {
                     await fillPassengerDetails(d);
+                } else if (currentUrl.includes("reviewbooking")) {
+                    await processReviewAndCaptcha();
+                } else if (currentUrl.includes("bkgpaymentoptions")) {
+                    await processPaymentOptions(d);
                 } else {
                     await searchTrains(d);
                 }

@@ -1,6 +1,6 @@
 {
   "manifest_version": 3,
-  "name": "IRCTC Intern Master (Test 4.2)",
+  "name": "IRCTC Intern Master (Test 4.10 Final)",
   "version": "4",
   "permissions": ["activeTab", "debugger", "scripting", "storage"],
   "background": {
