@@ -118,7 +118,7 @@ async function selectFirstAutocompleteItem(fieldName) {
     if (firstLi) {
         await nativeClick(firstLi);
         console.log(`✅ Selected first autocomplete item for ${fieldName}`);
-        await randomWait(300, 500);
+        await randomWait(100, 200);
     } else {
         console.log(`❌ Autocomplete list not found for ${fieldName}`);
     }
@@ -160,7 +160,7 @@ async function selectDropdown(containerId, searchText) {
             console.log(`🖱️ Clicking matching item: ${searchText}`);
             await nativeClick(opt);
             console.log(`✅ Success! Selected ${searchText}`);
-            await randomWait(400, 700);
+            await randomWait(100, 250);
             return true;
         }
     }
@@ -194,7 +194,7 @@ async function selectDate(dateStr) {
     
     // Press Escape to elegantly close the popup so it doesnt block UI
     await pressKeyNative("Escape", "Escape", 27);
-    await randomWait(300, 500);
+    await randomWait(100, 200);
     return true;
 }
 
@@ -206,17 +206,17 @@ async function searchTrains(d) {
     const fromInp = document.querySelector('p-autocomplete[formcontrolname="origin"] input');
     await typeNative(fromInp, d.from, "From Station");
     await selectFirstAutocompleteItem("From Station");
-    await randomWait(300, 600); // Breathe
+    await randomWait(100, 200); // Breathe
 
     // 2. To Station
     const toInp = document.querySelector('p-autocomplete[formcontrolname="destination"] input');
     await typeNative(toInp, d.to, "To Station");
     await selectFirstAutocompleteItem("To Station");
-    await randomWait(300, 600); // Breathe
+    await randomWait(100, 200); // Breathe
 
     // 3. Date
     await selectDate(d.date);
-    await randomWait(300, 600); // Breathe
+    await randomWait(100, 200); // Breathe
 
     // 4. Class
     await selectDropdown('#journeyClass', d.class);
@@ -228,7 +228,7 @@ async function searchTrains(d) {
     console.log("🚂 Routing command through Chrome Debugger API...");
     document.body.click(); // tiny programmatic blur
     console.log("⏳ Letting WAF settle and Angular validate...");
-    await randomWait(2500, 3500); 
+    await randomWait(500, 1000); 
 
     const searchBtn = document.querySelector("button.search_btn.train_Search");
     if (searchBtn) {
@@ -247,8 +247,8 @@ async function selectTrainAndBook(d) {
     
     // 1. Find Train Card
     let trainCard = null;
-    for(let i=0; i<20; i++) {
-        await wait(500);
+    for(let i=0; i<40; i++) {
+        await wait(250);
         const cards = Array.from(document.querySelectorAll('app-train-avl-enq'));
         trainCard = cards.find(c => c.textContent.includes(d.trainName));
         if (trainCard) break;
@@ -260,7 +260,7 @@ async function selectTrainAndBook(d) {
     }
 
     console.log(`✅ Found Train Card! Look for class: ${d.bookingClass}`);
-    await randomWait(500, 800);
+    await randomWait(50, 150);
     
     // 2. Click Refresh Button (div.pre-avl matching class)
     const preAvls = Array.from(trainCard.querySelectorAll('div.pre-avl'));
@@ -277,8 +277,8 @@ async function selectTrainAndBook(d) {
     // 3. Wait for AVl grid and click Date Cell
     console.log(`⏳ Waiting for Availability Grid...`);
     let dateClicked = false;
-    for(let i=0; i<30; i++) {
-        await wait(1000);
+    for(let i=0; i<60; i++) {
+        await wait(200);
         // Look inside trainCard for availability grid cells
         const blocks = Array.from(trainCard.querySelectorAll('div.pre-avl'));
         
@@ -302,8 +302,8 @@ async function selectTrainAndBook(d) {
     // 4. Click 'Book Now' Button
     if (dateClicked) {
         console.log(`⏳ Waiting for Book Now button...`);
-        for (let i=0; i<20; i++) {
-            await wait(1000);
+        for (let i=0; i<40; i++) {
+            await wait(250);
             // Re-query buttons to ensure they're fresh
             const buttons = Array.from(trainCard.querySelectorAll('button.train_Search'));
             const bookBtn = buttons.find(b => b.textContent.includes("Book Now"));
@@ -313,8 +313,8 @@ async function selectTrainAndBook(d) {
                 
                 // Wait for potential confirmation modal ("Yes" / "I Agree")
                 console.log(`⏳ Checking for Confirmation Modal...`);
-                for (let j = 0; j < 5; j++) {
-                    await wait(800);
+                for (let j = 0; j < 15; j++) {
+                    await wait(250);
                     const spans = Array.from(document.querySelectorAll('span.ui-button-text'));
                     const targetSpan = spans.find(span => span.textContent.trim() === "Yes" || span.textContent.trim() === "I Agree");
                     
@@ -343,7 +343,7 @@ async function selectTrainAndBook(d) {
                     
                     if (userInp && passInp && userInp.offsetParent !== null) {
                         console.log(`✅ Login Modal Detected!`);
-                        await randomWait(1000, 2000); // Human pause
+                        await randomWait(100, 250); // Human pause
 
                         // Smart fill: Check if username is already present
                         if (userInp.value && userInp.value.trim() !== '') {
@@ -351,7 +351,7 @@ async function selectTrainAndBook(d) {
                         } else {
                             console.log(`✍️ Username field is empty. Natively typing username...`);
                             await typeNative(userInp, d.username, "Username");
-                            await randomWait(300, 600);
+                            await randomWait(50, 150);
                         }
                         
                         // Smart fill: Check if password is already present
@@ -360,7 +360,7 @@ async function selectTrainAndBook(d) {
                         } else {
                             console.log(`✍️ Password field is empty. Natively typing password...`);
                             await typeNative(passInp, d.password, "Password");
-                            await randomWait(300, 600);
+                            await randomWait(50, 150);
                         }
                         
                         const buttons = Array.from(document.querySelectorAll("button.search_btn.train_Search"));
@@ -398,8 +398,8 @@ async function fillPassengerDetails(d) {
         
         // Wait for age input to appear indicating the block is rendered
         let paxBlockFound = false;
-        for (let i = 0; i < 15; i++) {
-            await wait(1000);
+        for (let i = 0; i < 30; i++) {
+            await wait(200);
             const ageInputs = document.querySelectorAll("input[formcontrolname='passengerAge']");
             if (ageInputs.length > idx) {
                 paxBlockFound = true;
@@ -420,18 +420,18 @@ async function fillPassengerDetails(d) {
         const berthSelect = document.querySelectorAll("select[formcontrolname='passengerBerthChoice']")[idx];
         
         // Wait just slightly for Angular view to stabilize fully
-        await randomWait(300, 500);
+        await randomWait(100, 200);
         
         if (nameInp) {
             await typeNative(nameInp, pax.name, "Passenger Name");
-            await randomWait(200, 400);
+            await randomWait(50, 150);
             await pressKeyNative("Escape", "Escape", 27); // Close autocomplete box just in case
-            await randomWait(300, 600);
+            await randomWait(50, 150);
         }
         
         if (ageInp) {
             await typeNative(ageInp, String(pax.age), "Passenger Age");
-            await randomWait(300, 500);
+            await randomWait(50, 150);
         }
         
         // Gender is a <select>. Natively, setting value + dispatching "change" works in Angular generally.
