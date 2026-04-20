@@ -49,21 +49,32 @@ chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
         chrome.debugger.sendCommand({ tabId: tabId }, "Input.dispatchMouseEvent", {
             type: "mouseMoved", x: request.x, y: request.y
         }, () => {
+            if (chrome.runtime.lastError) {
+                console.error("[Background] Move Error:", chrome.runtime.lastError.message);
+                sendResponse({ status: "Error", message: chrome.runtime.lastError.message });
+                return;
+            }
             // 2. Press down
-            setTimeout(() => {
+            chrome.debugger.sendCommand({ tabId: tabId }, "Input.dispatchMouseEvent", {
+                type: "mousePressed", x: request.x, y: request.y, button: "left", clickCount: 1
+            }, () => {
+                if (chrome.runtime.lastError) {
+                    console.error("[Background] Press Error:", chrome.runtime.lastError.message);
+                    sendResponse({ status: "Error", message: chrome.runtime.lastError.message });
+                    return;
+                }
+                // 3. Release
                 chrome.debugger.sendCommand({ tabId: tabId }, "Input.dispatchMouseEvent", {
-                    type: "mousePressed", x: request.x, y: request.y, button: "left", clickCount: 1
+                    type: "mouseReleased", x: request.x, y: request.y, button: "left", clickCount: 1
                 }, () => {
-                    // 3. Release
-                    setTimeout(() => {
-                        chrome.debugger.sendCommand({ tabId: tabId }, "Input.dispatchMouseEvent", {
-                            type: "mouseReleased", x: request.x, y: request.y, button: "left", clickCount: 1
-                        }, () => {
-                            sendResponse({ status: "Success" });
-                        });
-                    }, Math.floor(Math.random() * 50) + 50); // Hold for 50-100ms
+                    if (chrome.runtime.lastError) {
+                        console.error("[Background] Release Error:", chrome.runtime.lastError.message);
+                        sendResponse({ status: "Error", message: chrome.runtime.lastError.message });
+                        return;
+                    }
+                    sendResponse({ status: "Success" });
                 });
-            }, Math.floor(Math.random() * 100) + 50); // Pause before clicking
+            });
         });
 
         return true; 
@@ -88,11 +99,13 @@ chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
              chrome.debugger.sendCommand({ tabId: tabId }, "Input.dispatchKeyEvent", {
                  type: "keyDown", text: char
              }, () => {
+                 if (chrome.runtime.lastError) console.error("[Background] KeyDown Error:", chrome.runtime.lastError.message);
                  // Dispatch keyUp
                  setTimeout(() => {
                      chrome.debugger.sendCommand({ tabId: tabId }, "Input.dispatchKeyEvent", {
                          type: "keyUp", text: char
                      }, () => {
+                         if (chrome.runtime.lastError) console.error("[Background] KeyUp Error:", chrome.runtime.lastError.message);
                          // Small delay before next char
                          setTimeout(() => typeChar(index + 1), Math.floor(Math.random() * 80) + 40);
                      });

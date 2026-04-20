@@ -18,7 +18,12 @@ async function attachDebugger() {
 
 async function detachDebugger() {
     return new Promise(resolve => {
-        chrome.runtime.sendMessage({ action: "DETACH" }, resolve);
+        try {
+            chrome.runtime.sendMessage({ action: "DETACH" }, resolve);
+        } catch (e) {
+            // Context might be invalidated if page is navigating. This is fine.
+            resolve();
+        }
     });
 }
 
@@ -43,10 +48,13 @@ async function nativeClick(element) {
             x: targetX, 
             y: targetY
         }, (response) => {
-            if (response && response.status === "Success") {
+            if (chrome.runtime.lastError) {
+                console.error("❌ Native click failed with lastError:", chrome.runtime.lastError.message);
+                resolve(false);
+            } else if (response && response.status === "Success") {
                 resolve(true);
             } else {
-                console.error("❌ Native click failed", response);
+                console.error("❌ Native click failed. Response:", response);
                 resolve(false);
             }
         });
@@ -148,26 +156,35 @@ async function selectDropdown(containerId, searchText) {
     return false;
 }
 
+async function pressKeyNative(key, code, keyCode) {
+    console.log(`⌨️ Native Key Press: ${key}`);
+    return new Promise((resolve) => {
+        chrome.runtime.sendMessage({
+            action: "NATIVE_KEY", 
+            key: key,
+            code: code,
+            keyCode: keyCode
+        }, (response) => {
+            resolve();
+        });
+    });
+}
 async function selectDate(dateStr) {
-    console.log(`📅 Selecting Date: ${dateStr}`);
-    const [day] = dateStr.split("/");
-    const targetDay = parseInt(day);
+    console.log(`📅 Typing Date directly: ${dateStr}`);
     
-    const calendar = document.querySelector("#jDate input, p-calendar[formcontrolname='journeyDate'] input");
-    if (calendar) {
-        await nativeClick(calendar);
-        await randomWait(400, 600);
+    const calendarDataInp = document.querySelector("#jDate input, p-calendar[formcontrolname='journeyDate'] input");
+    if (!calendarDataInp) {
+        console.error("❌ Could not find calendar input");
+        return false;
     }
 
-    const days = document.querySelectorAll("a.ui-state-default:not(.ui-state-disabled)");
-    for (const dayEl of days) {
-        if (parseInt(dayEl.textContent.trim()) === targetDay) {
-            await nativeClick(dayEl);
-            console.log(`✅ Date ${dateStr} selected.`);
-            return true;
-        }
-    }
-    return false;
+    // Use string type method directly
+    await typeNative(calendarDataInp, dateStr, "Date");
+    
+    // Press Escape to elegantly close the popup so it doesnt block UI
+    await pressKeyNative("Escape", "Escape", 27);
+    await randomWait(300, 500);
+    return true;
 }
 
 // ----------------------------------------------------
@@ -217,23 +234,13 @@ async function searchTrains(d) {
 async function selectTrainAndBook(d) {
     console.log(`🚂 Looking for train: ${d.trainName}`);
     
+    // 1. Find Train Card
     let trainCard = null;
-    let attempts = 0;
-    while (attempts < 20) {
+    for(let i=0; i<20; i++) {
         await wait(500);
-        // Find train heading, usually strong or div containing train name/number
-        const allElements = document.querySelectorAll('.train-heading, strong, div.form-group');
-        for (const el of allElements) {
-            if (el.textContent && el.textContent.includes(d.trainName)) {
-                // Find parent container that wraps the train
-                trainCard = el.closest('app-train-avl-enq') || el.closest('.form-group') || (el.parentElement && el.parentElement.parentElement ? el.parentElement.parentElement.parentElement : null);
-                if (trainCard && trainCard.querySelector('.pre-avl')) {
-                    break;
-                }
-            }
-        }
-        if (trainCard && trainCard.querySelector('.pre-avl')) break;
-        attempts++;
+        const cards = Array.from(document.querySelectorAll('app-train-avl-enq'));
+        trainCard = cards.find(c => c.textContent.includes(d.trainName));
+        if (trainCard) break;
     }
 
     if (!trainCard) {
@@ -244,91 +251,76 @@ async function selectTrainAndBook(d) {
     console.log(`✅ Found Train Card! Look for class: ${d.bookingClass}`);
     await randomWait(500, 800);
     
-    // Step 1: Click the Class from the upper horizontal table (Refresh or Class block)
-    let classClicked = false;
-    attempts = 0;
-    let extractedClassName = d.bookingClass.includes("(") ? d.bookingClass.substring(0, 3) : d.bookingClass;
-
-    while (attempts < 10) {
-        await wait(500);
-        const preAvlBoxes = trainCard.querySelectorAll('td .pre-avl, div.pre-avl');
-        for (const box of preAvlBoxes) {
-            // Match the bookingClass string (e.g. AC 2 Tier (2A) or 2A)
-            if (box.textContent.includes(d.bookingClass) || box.textContent.includes(extractedClassName)) {
-                await nativeClick(box);
-                classClicked = true;
-                break;
-            }
-        }
-        if (classClicked) break;
-        attempts++;
+    // 2. Click Refresh Button (div.pre-avl matching class)
+    const preAvls = Array.from(trainCard.querySelectorAll('div.pre-avl'));
+    const targetPreAvl = preAvls.find(el => el.textContent.includes(d.bookingClass));
+    
+    if (targetPreAvl) {
+        await nativeClick(targetPreAvl);
+        console.log(`✅ Clicked Class Refresh!`);
+    } else {
+        console.error("❌ Could not find class block for", d.bookingClass);
+        return false;
     }
 
-    if (!classClicked) {
-        console.error("❌ Could not find the class box for", d.bookingClass);
-    }
-
-    // Step 2: Ensure the correct Tier Tab is selected from ui-tabmenu
-    console.log(`⏳ Waiting for Tier Tabs to expand...`);
-    let tabClicked = false;
-    attempts = 0;
-    while (attempts < 15) {
-        await wait(500);
-        const tabs = trainCard.querySelectorAll('.ui-tabmenuitem strong');
-        if (tabs.length > 0) {
-            for (const tab of tabs) {
-                if (tab.textContent.includes(d.bookingClass) || tab.textContent.includes(extractedClassName)) {
-                    await nativeClick(tab.closest('a'));
-                    tabClicked = true;
-                    break;
-                }
-            }
-            break; 
-        }
-        attempts++;
-    }
-
-    // Step 3: Wait for Availability Grid & Click on Available Date Cell
+    // 3. Wait for AVl grid and click Date Cell
     console.log(`⏳ Waiting for Availability Grid...`);
     let dateClicked = false;
-    attempts = 0;
-    while (attempts < 20) {
-        await wait(500);
-        // Look through grid TD cells
-        const blocks = trainCard.querySelectorAll('td.link .pre-avl, td .pre-avl, td.link');
-        for (const block of blocks) {
-            if (block.textContent.includes("WL") || block.textContent.includes("AVAILABLE") || block.textContent.includes("RAC") || block.textContent.includes("REGRET")) {
-                await nativeClick(block);
-                dateClicked = true;
-                console.log(`✅ Selected Availability Date Block.`);
-                break;
-            }
+    for(let i=0; i<30; i++) {
+        await wait(1000);
+        // Look inside trainCard for availability grid cells
+        const blocks = Array.from(trainCard.querySelectorAll('div.pre-avl'));
+        
+        // Find first pre-avl block that contains AVAILABLE, RAC, or WL and is not the class block
+        const dateTarget = blocks.find(el => 
+            el !== targetPreAvl && 
+            (el.querySelector('div.AVAILABLE, div.RAC, div.WL') !== null || 
+             el.textContent.includes("AVAILABLE") || 
+             el.textContent.includes("RAC") || 
+             el.textContent.includes("WL"))
+        );
+
+        if (dateTarget) {
+            await nativeClick(dateTarget);
+            dateClicked = true;
+            console.log(`✅ Clicked Date Cell!`);
+            break;
         }
-        if (dateClicked) break;
-        attempts++;
     }
 
-    // Step 4: Click 'Book Now' Button
-    console.log(`⏳ Waiting for Book Now button...`);
-    attempts = 0;
-    let booked = false;
-    while (attempts < 15) {
-        await wait(500);
-        const buttons = trainCard.querySelectorAll('button.btnDefault.train_Search');
-        for (const btn of buttons) {
-            if (btn.textContent.includes("Book Now")) {
-                await nativeClick(btn);
-                booked = true;
+    // 4. Click 'Book Now' Button
+    if (dateClicked) {
+        console.log(`⏳ Waiting for Book Now button...`);
+        for (let i=0; i<20; i++) {
+            await wait(1000);
+            // Re-query buttons to ensure they're fresh
+            const buttons = Array.from(trainCard.querySelectorAll('button.train_Search'));
+            const bookBtn = buttons.find(b => b.textContent.includes("Book Now"));
+            if (bookBtn) {
+                await nativeClick(bookBtn);
                 console.log(`✅ Clicked Book Now Button!`);
+                
+                // Wait for potential confirmation modal ("Yes" / "I Agree")
+                console.log(`⏳ Checking for Confirmation Modal...`);
+                for (let j = 0; j < 5; j++) {
+                    await wait(800);
+                    const spans = Array.from(document.querySelectorAll('span.ui-button-text'));
+                    const targetSpan = spans.find(span => span.textContent.trim() === "Yes" || span.textContent.trim() === "I Agree");
+                    
+                    if (targetSpan) {
+                        // find closest button
+                        const targetBtn = targetSpan.closest('button');
+                        if (targetBtn) {
+                            await nativeClick(targetBtn);
+                            console.log(`✅ Cleared Confirmation Dialog!`);
+                        }
+                        break;
+                    }
+                }
+                
                 break;
             }
         }
-        if (booked) break;
-        attempts++;
-    }
-    
-    if(!booked) {
-        console.error("❌ Could not find Book Now button.");
     }
 }
 
@@ -359,9 +351,14 @@ chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
                 sendResponse({ status: "Success" });
 
             } catch (error) {
-                console.error("💥 Automation crashed:", error);
-                await detachDebugger();
-                sendResponse({ status: "Error", message: error.toString() });
+                if (error.message && error.message.includes("Extension context invalidated")) {
+                    console.log("✅ Booking triggered page transition! Automation shutting down cleanly.");
+                } else {
+                    console.error("💥 Automation crashed:", error);
+                    await detachDebugger();
+                }
+                // Suppress response error on invalidated contexts
+                try { sendResponse({ status: "Error", message: error.toString() }); } catch(e){}
             }
         })();
 
