@@ -1,7 +1,201 @@
 const wait = (ms) => new Promise(res => setTimeout(res, ms));
+const AUTOMATION_SESSION_KEY = "irctcAutomationSession";
+const automationRuntime = {
+    running: false,
+    pendingResume: false,
+    resumeTimer: null,
+    lastKnownUrl: window.location.href,
+    lastAttemptSignature: null,
+    lastAttemptAt: 0
+};
 
 // Randomizer function for human-like delays
 const randomWait = (min, max) => wait(Math.floor(Math.random() * (max - min + 1)) + min);
+
+function getAutomationStage(url = window.location.href) {
+    const lowerUrl = url.toLowerCase();
+
+    if (lowerUrl.includes("train-list")) return "train-list";
+    if (lowerUrl.includes("psgninput")) return "psgninput";
+    if (lowerUrl.includes("reviewbooking")) return "reviewbooking";
+    if (lowerUrl.includes("bkgpaymentoptions") || lowerUrl.includes("paymentoptions")) return "bkgpaymentoptions";
+
+    return "nget/train-search";
+}
+
+function getRunSignature(url = window.location.href) {
+    return `${getAutomationStage(url)}|${new URL(url).pathname.toLowerCase()}`;
+}
+
+function getAutomationSession() {
+    return new Promise((resolve) => {
+        chrome.storage.local.get([AUTOMATION_SESSION_KEY], (result) => {
+            resolve(result[AUTOMATION_SESSION_KEY] || null);
+        });
+    });
+}
+
+function setAutomationSession(session) {
+    return new Promise((resolve) => {
+        chrome.storage.local.set({ [AUTOMATION_SESSION_KEY]: session }, resolve);
+    });
+}
+
+async function updateAutomationSession(updates) {
+    const session = await getAutomationSession();
+    if (!session) return null;
+
+    const nextSession = {
+        ...session,
+        ...updates,
+        updatedAt: Date.now()
+    };
+
+    await setAutomationSession(nextSession);
+    return nextSession;
+}
+
+async function safeUpdateAutomationSession(updates) {
+    try {
+        return await updateAutomationSession(updates);
+    } catch (error) {
+        console.debug("Session update skipped:", error);
+        return null;
+    }
+}
+
+async function deactivateAutomationSession(reason) {
+    try {
+        const session = await getAutomationSession();
+        if (!session) return;
+
+        await setAutomationSession({
+            ...session,
+            active: false,
+            updatedAt: Date.now(),
+            lastResult: reason
+        });
+    } catch (error) {
+        console.debug("Session deactivation skipped:", error);
+    }
+}
+
+async function recordPaymentPageReached() {
+    try {
+        const session = await getAutomationSession();
+        if (!session?.startedAt || session.paymentPageReachedAt) {
+            return null;
+        }
+
+        const reachedAt = Date.now();
+        const elapsedMs = Math.max(0, reachedAt - session.startedAt);
+
+        await setAutomationSession({
+            ...session,
+            paymentPageReachedAt: reachedAt,
+            timeToPaymentMs: elapsedMs,
+            updatedAt: reachedAt
+        });
+
+        const totalSeconds = Math.floor(elapsedMs / 1000);
+        const minutes = Math.floor(totalSeconds / 60);
+        const seconds = totalSeconds % 60;
+        const durationLabel = minutes > 0 ? `${minutes}m ${seconds}s` : `${seconds}s`;
+
+        console.log(`[Automation] Time to payment: ${durationLabel}`);
+        return elapsedMs;
+    } catch (error) {
+        console.debug("Payment timing update skipped:", error);
+        return null;
+    }
+}
+
+function getCurrentTabId() {
+    return new Promise((resolve) => {
+        chrome.runtime.sendMessage({ action: "GET_TAB_ID" }, (response) => {
+            resolve(response?.tabId ?? null);
+        });
+    });
+}
+
+function scheduleAutoResume(reason, delay = 600) {
+    if (automationRuntime.resumeTimer) {
+        clearTimeout(automationRuntime.resumeTimer);
+    }
+
+    automationRuntime.resumeTimer = setTimeout(() => {
+        automationRuntime.resumeTimer = null;
+        maybeResumeAutomation(reason);
+    }, delay);
+}
+
+function watchForRouteChanges() {
+    if (window.__irctcAutomationRouteWatchInstalled) {
+        return false;
+    }
+    window.__irctcAutomationRouteWatchInstalled = true;
+
+    const notifyRouteChange = () => {
+        if (automationRuntime.lastKnownUrl !== window.location.href) {
+            automationRuntime.lastKnownUrl = window.location.href;
+            scheduleAutoResume("route-change", 800);
+        }
+    };
+
+    const wrapHistoryMethod = (methodName) => {
+        const originalMethod = history[methodName];
+        history[methodName] = function (...args) {
+            const result = originalMethod.apply(this, args);
+            notifyRouteChange();
+            return result;
+        };
+    };
+
+    wrapHistoryMethod("pushState");
+    wrapHistoryMethod("replaceState");
+
+    window.addEventListener("popstate", notifyRouteChange);
+    window.addEventListener("hashchange", notifyRouteChange);
+
+    setInterval(notifyRouteChange, 1000);
+}
+
+async function maybeResumeAutomation(reason) {
+    if (automationRuntime.running) {
+        automationRuntime.pendingResume = true;
+        return false;
+    }
+
+    const [session, tabId] = await Promise.all([
+        getAutomationSession(),
+        getCurrentTabId()
+    ]);
+
+    if (!session?.active || !session?.data || session.autoResume === false) {
+        return false;
+    }
+
+    if (session.targetTabId && tabId && session.targetTabId !== tabId) {
+        return;
+    }
+
+    const signature = getRunSignature();
+    const lastAttemptIsFresh =
+        automationRuntime.lastAttemptSignature === signature &&
+        (Date.now() - automationRuntime.lastAttemptAt) < 4000;
+
+    if (lastAttemptIsFresh || session.lastCompletedSignature === signature) {
+        return;
+    }
+
+    try {
+        await startAutomationRun(session.data, {
+            trigger: `auto:${reason}`
+        });
+    } catch (error) {
+        console.debug("Auto resume failed:", error);
+    }
+}
 
 async function attachDebugger() {
     return new Promise(resolve => {
@@ -40,8 +234,15 @@ async function humanChaos() {
 
 async function nativeClick(element) {
     if (!element) return false;
-    element.scrollIntoView({ behavior: 'smooth', block: 'center' });
-    await wait(500); // let scroll finish
+    const rectBeforeScroll = element.getBoundingClientRect();
+    const needsScroll =
+        rectBeforeScroll.top < 80 ||
+        rectBeforeScroll.bottom > (window.innerHeight - 80) ||
+        rectBeforeScroll.left < 0 ||
+        rectBeforeScroll.right > window.innerWidth;
+
+    element.scrollIntoView({ behavior: 'auto', block: 'center', inline: 'center' });
+    await randomWait(needsScroll ? 140 : 40, needsScroll ? 240 : 90);
     
     const rect = element.getBoundingClientRect();
     // Smaller random offset to avoid missing the bounding box
@@ -82,7 +283,7 @@ async function typeNative(element, text, fieldName) {
     // Clear the element programmatically just in case
     element.value = "";
     element.dispatchEvent(new Event('input', { bubbles: true }));
-    await wait(200);
+    await randomWait(70, 130);
     
     return new Promise((resolve) => {
         chrome.runtime.sendMessage({
@@ -99,7 +300,7 @@ async function selectFirstAutocompleteItem(fieldName) {
     let attempts = 0;
     let firstLi = null;
     while(attempts < 20) {
-        await wait(200);
+        await wait(150);
         const panels = document.querySelectorAll('.ui-autocomplete-panel, .ng-trigger-overlayAnimation'); // Adding fallback class for newer primeNG
         for (const panel of panels) {
             const style = window.getComputedStyle(panel);
@@ -137,7 +338,7 @@ async function selectDropdown(containerId, searchText) {
     let options = [];
     let attempts = 0;
     while (attempts < 20) {
-        await wait(200); 
+        await wait(150); 
         const openPanels = document.querySelectorAll('.ui-dropdown-panel');
         for (const panel of openPanels) {
             const style = window.getComputedStyle(panel);
@@ -228,15 +429,18 @@ async function searchTrains(d) {
     console.log("🚂 Routing command through Chrome Debugger API...");
     document.body.click(); // tiny programmatic blur
     console.log("⏳ Letting WAF settle and Angular validate...");
-    await randomWait(500, 1000); 
+    await randomWait(250, 450); 
 
+    let searchTriggered = false;
     const searchBtn = document.querySelector("button.search_btn.train_Search");
     if (searchBtn) {
         await nativeClick(searchBtn);
+        searchTriggered = true;
         console.log("✅ Search sequence executed by native API!");
     } else {
         console.error("❌ Could not find the Search Trains button.");
     }
+    return searchTriggered;
 }
 
 // ----------------------------------------------------
@@ -277,6 +481,7 @@ async function selectTrainAndBook(d) {
     // 3. Wait for AVl grid and click Date Cell
     console.log(`⏳ Waiting for Availability Grid...`);
     let dateClicked = false;
+    let bookingTriggered = false;
     for(let i=0; i<60; i++) {
         await wait(200);
         // Look inside trainCard for availability grid cells
@@ -309,6 +514,7 @@ async function selectTrainAndBook(d) {
             const bookBtn = buttons.find(b => b.textContent.includes("Book Now"));
             if (bookBtn) {
                 await nativeClick(bookBtn);
+                bookingTriggered = true;
                 console.log(`✅ Clicked Book Now Button!`);
                 
                 // Wait for potential confirmation modal ("Yes" / "I Agree")
@@ -380,6 +586,7 @@ async function selectTrainAndBook(d) {
             }
         }
     }
+    return bookingTriggered;
 }
 
 // ----------------------------------------------------
@@ -440,7 +647,7 @@ async function fillPassengerDetails(d) {
             genSelect.dispatchEvent(new Event('change', { bubbles: true }));
             console.log(`✅ Selected Gender: ${pax.gender}`);
         }
-        await randomWait(300, 500);
+        await randomWait(120, 220);
         
         // Berth Choice
         if (pax.berth && berthSelect) {
@@ -456,7 +663,7 @@ async function fillPassengerDetails(d) {
             const addBtn = addSpans.find(s => s.textContent.includes("+ Add Passenger"));
             if (addBtn) {
                 await nativeClick(addBtn);
-                await randomWait(800, 1500);
+                await randomWait(450, 900);
             }
         }
     }
@@ -470,7 +677,7 @@ async function fillPassengerDetails(d) {
     console.log(`⏳ Searching for BHIM/UPI Payment Option...`);
     let paymentSelected = false;
     for (let i = 0; i < 15; i++) {
-        await wait(1000);
+        await wait(600);
         // Locate label with the exact text
         const labels = Array.from(document.querySelectorAll('label'));
         const upiLabel = labels.find(l => l.textContent.includes("Pay through BHIM/UPI"));
@@ -505,10 +712,12 @@ async function fillPassengerDetails(d) {
         }
     }
     
+    let continueTriggered = false;
+
     if (paymentSelected) {
         console.log(`⏳ Searching for Continue button...`);
         for (let i = 0; i < 20; i++) {
-            await wait(1000);
+            await wait(600);
             const buttons = Array.from(document.querySelectorAll('button.btnDefault'));
             const continueBtn = buttons.find(b => b.textContent && b.textContent.trim() === "Continue");
             
@@ -519,11 +728,13 @@ async function fillPassengerDetails(d) {
                 await randomWait(500, 1000);
                 
                 await nativeClick(continueBtn); 
+                continueTriggered = true;
                 console.log(`✨✨ CHECKOUT ACTION COMPLETE ✨✨`);
                 break;
             }
         }
     }
+    return continueTriggered;
 }
 
 // ----------------------------------------------------
@@ -547,7 +758,7 @@ async function processReviewAndCaptcha() {
         for (let i = 0; i < 15; i++) {
             await wait(250); // Aggressively poll at 4x speed
             
-            if (window.location.href.toLowerCase().includes("bkgpaymentoptions")) return;
+            if (window.location.href.toLowerCase().includes("bkgpaymentoptions")) return true;
 
             captchaInput = document.querySelector("input[formcontrolname='captcha'], input#captcha");
             const possibleImgs = Array.from(document.querySelectorAll("img"));
@@ -571,7 +782,7 @@ async function processReviewAndCaptcha() {
         
         if (!base64Image || !captchaInput) {
             console.warn(`⚠️ Could not locate a New CAPTCHA image. Page might be hanging or transitioned.`);
-            if (window.location.href.toLowerCase().includes("bkgpaymentoptions")) return;
+            if (window.location.href.toLowerCase().includes("bkgpaymentoptions")) return true;
             continue; 
         }
         
@@ -592,11 +803,11 @@ async function processReviewAndCaptcha() {
                 console.log(`🧠 Local AI solved CAPTCHA: [${solvedText}]`);
             } else {
                 console.error(`❌ Local API returned an error.`);
-                return; 
+                return false; 
             }
         } catch (e) {
             console.error(`❌ Connection to Local Python Server failed!`, e);
-            return;
+            return false;
         }
         
         // 3. Punch in the solution 
@@ -627,7 +838,7 @@ async function processReviewAndCaptcha() {
                     const lowerUrl = window.location.href.toLowerCase();
                     if (lowerUrl.includes("paymentoptions") || lowerUrl.includes("bkgpaymentoptions")) {
                         console.log(`✨✨ CAPTCHA ACCEPTED! ✨✨`);
-                        return;
+                        return true;
                     }
                     
                     const errorSpan = document.querySelector(".error, .ui-messages-error-detail");
@@ -640,7 +851,7 @@ async function processReviewAndCaptcha() {
                 
                 if (!errorFound) {
                     const lowerUrl = window.location.href.toLowerCase();
-                    if (lowerUrl.includes("paymentoptions") || lowerUrl.includes("bkgpaymentoptions")) return;
+                    if (lowerUrl.includes("paymentoptions") || lowerUrl.includes("bkgpaymentoptions")) return true;
                 }
                 console.warn(`⚠️ Validation failed or timed out. Re-engaging captcha extraction...`);
             }
@@ -656,13 +867,14 @@ async function processReviewAndCaptcha() {
     }
     
     console.error(`❌ Max CAPTCHA retries reached. Manual intervention required.`);
+    return false;
 }
 
 async function processPaymentOptions(d) {
     console.log(`🚂 Reached Payment Options page. Finalizing order...`);
     
     for (let i = 0; i < 20; i++) {
-        await wait(1000);
+        await wait(600);
         
         // Broaden search: look for ANY button that mentions "Pay & Book"
         const allButtons = Array.from(document.querySelectorAll('button'));
@@ -697,13 +909,111 @@ async function processPaymentOptions(d) {
             if (window.location.href.includes("irctcipay.com")) {
                  console.log("✅ Verified: Landing on iPay gateway.");
             }
-            break;
+            return true;
         } else {
             const visibleButtons = allButtons.filter(b => b.offsetParent !== null).map(b => b.textContent?.trim());
             console.log(`⏳ Still looking for 'Pay & Book' button...`);
         }
     }
+    return false;
 }
+
+async function startAutomationRun(data, options = {}) {
+    const trigger = options.trigger || "manual";
+    const force = Boolean(options.force);
+    const runSignature = getRunSignature();
+    const currentStage = getAutomationStage();
+    const repeatedAttempt =
+        automationRuntime.lastAttemptSignature === runSignature &&
+        (Date.now() - automationRuntime.lastAttemptAt) < 4000;
+
+    if (automationRuntime.running || (!force && repeatedAttempt)) {
+        return false;
+    }
+
+    automationRuntime.running = true;
+    automationRuntime.pendingResume = false;
+    automationRuntime.lastAttemptSignature = runSignature;
+    automationRuntime.lastAttemptAt = Date.now();
+
+    console.log("ðŸš€ --- STARTING AUTOMATION (HUMAN MODE) ---");
+
+    try {
+        const attached = await attachDebugger();
+        if (!attached) throw new Error("Could not attach debugger");
+
+        let stageResult = false;
+        const currentUrl = window.location.href.toLowerCase();
+
+        const onPaymentPage =
+            currentUrl.includes("bkgpaymentoptions") ||
+            currentUrl.includes("paymentoptions");
+
+        if (currentUrl.includes("train-list")) {
+            stageResult = await selectTrainAndBook(data);
+        } else if (currentUrl.includes("psgninput")) {
+            stageResult = await fillPassengerDetails(data);
+        } else if (currentUrl.includes("reviewbooking")) {
+            stageResult = await processReviewAndCaptcha();
+        } else if (onPaymentPage) {
+            await recordPaymentPageReached();
+            stageResult = await processPaymentOptions(data);
+        } else {
+            stageResult = await searchTrains(data);
+        }
+
+        if (stageResult) {
+            await safeUpdateAutomationSession({
+                lastStage: currentStage,
+                lastUrl: window.location.href,
+                lastResult: "success",
+                lastTrigger: trigger,
+                lastCompletedSignature: runSignature
+            });
+
+            if (currentStage === "bkgpaymentoptions") {
+                await deactivateAutomationSession("payment_handoff");
+            }
+        } else {
+            await safeUpdateAutomationSession({
+                lastStage: currentStage,
+                lastUrl: window.location.href,
+                lastResult: "stalled",
+                lastTrigger: trigger
+            });
+        }
+
+        console.log("ðŸ --- TASK COMPLETE ---");
+        await detachDebugger();
+        return stageResult;
+
+    } catch (error) {
+        if (error.message && error.message.includes("Extension context invalidated")) {
+            console.log("âœ… Booking triggered page transition! Automation shutting down cleanly.");
+        } else {
+            console.error("ðŸ’¥ Automation crashed:", error);
+            await safeUpdateAutomationSession({
+                lastStage: currentStage,
+                lastUrl: window.location.href,
+                lastResult: "error",
+                lastTrigger: trigger,
+                lastError: error.toString()
+            });
+            await detachDebugger();
+        }
+        throw error;
+    } finally {
+        automationRuntime.running = false;
+
+        if (automationRuntime.pendingResume) {
+            automationRuntime.pendingResume = false;
+            scheduleAutoResume("queued-resume", 500);
+        }
+    }
+}
+
+watchForRouteChanges();
+scheduleAutoResume("page-load", 1200);
 
 // ----------------------------------------------------
 // MAIN EVENT LISTENER
@@ -714,6 +1024,13 @@ chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
         
         (async () => {
             try {
+                const completed = await startAutomationRun(msg.data, {
+                    trigger: msg.source || "manual",
+                    force: Boolean(msg.force)
+                });
+                sendResponse({ status: completed ? "Success" : "Paused" });
+                return;
+
                 const attached = await attachDebugger();
                 if (!attached) throw new Error("Could not attach debugger");
                 

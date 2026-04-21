@@ -60,10 +60,10 @@ To automate Phase 5 (the Review Captcha Validation), you must deploy the local A
 
 ## 🚦 How to Use
 
-1. Launch Chrome and head to the [IRCTC Website](https://www.irctc.co.in/).
+1. Launch Chrome and head to the [IRCTC Website](https://www.irctc.co.in/nget/train-search/).
 2. Setup your desired automation credentials physically in `popup.js` (Class, Username, Password, Pax Arrays).
-3. Click the **Extension Icon** and click **Run Automation**. 
-4. **Relax.** The script takes over native control. 
+3. Click the **Extension Icon** and click **Arm Automation** once.
+4. **Relax.** The script takes over native control and auto-resumes across IRCTC page changes on the same tab.
    - *Note:* Do NOT frantically move your physical mouse or hit keys during critical CDP interactions or you will interrupt the viewport calculations!
 
 ### Automation Stages

@@ -3,10 +3,16 @@
   <head>
     <style>
       body {
-        width: 260px;
+        width: 280px;
         padding: 15px;
         font-family: "Segoe UI", Tahoma, sans-serif;
         background: #f8f9fa;
+      }
+      .status {
+        font-size: 12px;
+        font-weight: 600;
+        color: #495057;
+        margin-bottom: 10px;
       }
       .card {
         background: white;
@@ -34,18 +40,26 @@
       button:hover {
         background: #e66a1f;
       }
-      #bookBtn {
-        background: #28a745;
+      button.secondary {
+        background: #6c757d;
+        margin-top: 8px;
       }
-      #bookBtn:hover {
-        background: #218838;
+      button.secondary:hover {
+        background: #5a6268;
+      }
+      button:disabled {
+        opacity: 0.6;
+        cursor: not-allowed;
       }
     </style>
   </head>
   <body>
+    <div id="status" class="status">Status: Idle</div>
     <div class="card">
-      <div class="detail"><b>Search:</b> LTT -> PRYJ</div>
+      <div class="detail"><b>Search:</b> LTT -&gt; PRYJ</div>
       <div class="detail"><b>Date:</b> 30/05/2026</div>
+      <div class="detail"><b>Class:</b> Sleeper (SL)</div>
+      <div class="detail"><b>Quota:</b> General</div>
     </div>
     <div class="card">
       <div class="detail"><b>Train:</b> MAHANAGARI EXP (22177)</div>
@@ -56,19 +70,20 @@
       <div class="detail"><b>Pass:</b> Apovey@6472</div>
     </div>
     <div class="card">
-      <div class="detail"><b>Pasenger 1:</b> Vikas Pal</div>
+      <div class="detail"><b>Passenger 1:</b> Vikas Pal</div>
       <div class="detail"><b>Age:</b> 22</div>
       <div class="detail"><b>Gender:</b> M</div>
       <div class="detail"><b>Berth:</b> LB</div>
     </div>
     <div class="card">
-      <div class="detail"><b>Pasenger 2:</b> Shivshankar Pal</div>
+      <div class="detail"><b>Passenger 2:</b> Shivshankar Pal</div>
       <div class="detail"><b>Age:</b> 48</div>
       <div class="detail"><b>Gender:</b> M</div>
       <div class="detail"><b>Berth:</b> LB</div>
     </div>
 
-    <button id="runBtn">⚡ RUN AUTOMATION</button>
+    <button id="runBtn">Arm Automation</button>
+    <button id="stopBtn" class="secondary">Stop Automation</button>
     <script src="popup.js"></script>
   </body>
 </html>

@@ -1,7 +1,7 @@
 {
   "manifest_version": 3,
-  "name": "IRCTC Intern Master (Test 5)",
-  "version": "5.0",
+  "name": "IRCTC Intern Master (Test 6)",
+  "version": "6.1",
   "permissions": ["activeTab", "debugger", "scripting", "storage"],
   "background": {
     "service_worker": "background.js"
